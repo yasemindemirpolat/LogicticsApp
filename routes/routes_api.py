@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 from models.db import db, Vehicle, Location, VehicleType
-from services.route_service import calculate_multi_stop_route
+from services.route_service import calculate_mixed_vehicle_route
 
 routes_bp = Blueprint("routes", __name__, url_prefix="/api/routes")
 
@@ -62,24 +62,28 @@ def add_location():
         return jsonify({"error": str(e)}), 400
 
 # --- ROTA HESAPLAMA ---
-@routes_bp.route("/calculate-multi", methods=["POST"])
-def calculate_multi():
+@routes_bp.route("/calculate-mixed", methods=["POST"])
+def calculate_mixed():
+    """
+    Beklenen JSON:
+    {
+        "segments": [
+            { 
+              "start": {"lat": 38.0, "lon": 39.0}, 
+              "end": {"lat": 38.1, "lon": 39.1}, 
+              "vehicle_id": 1 
+            },
+            ...
+        ]
+    }
+    """
     data = request.get_json()
-    # Body: { "stops": [...], "vehicle_id": 5 } (Buradaki ID, 'Vehicle' tablosundaki ID'dir)
-    
-    stops = data.get("stops", [])
-    vehicle_id = data.get("vehicle_id")
-    
-    # Seçilen aracı bul
-    vehicle = Vehicle.query.get(vehicle_id)
-    if not vehicle:
-        return jsonify({"error": "Araç bulunamadı"}), 400
-        
-    # Hız ve maliyet bilgilerini aracın "TİPİNDEN" alıyoruz
-    speed = vehicle.type.speed_kmh
-    cost = vehicle.type.cost_per_km
-    
-    result = calculate_multi_stop_route(stops, speed, cost)
+    segments = data.get("segments", [])
+
+    if not segments:
+        return jsonify({"error": "Rota segmentleri eksik"}), 400
+
+    result = calculate_mixed_vehicle_route(segments)
     
     if not result:
         return jsonify({"error": "Rota hesaplanamadı"}), 400

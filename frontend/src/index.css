@@ -5,13 +5,29 @@
 
   color-scheme: light dark;
   color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
+  background-color: #f8f9fa; /* Arka planı hafif gri yaptık, göz yormaması için */
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* --- KRİTİK AYARLAR BAŞLANGIÇ --- */
+/* Haritanın tam ekran görünebilmesi için bu zincirleme yükseklik ayarı şarttır */
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden; /* Sayfada çift scroll bar çıkmasını engeller */
+}
+
+/* Tüm elemanların boyut hesaplamasını kolaylaştırır (padding taşmasını önler) */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+/* --- KRİTİK AYARLAR BİTİŞ --- */
 
 a {
   font-weight: 500;
@@ -22,19 +38,13 @@ a:hover {
   color: #535bf2;
 }
 
-body {
-  margin: 0;
-  display: flex;
-  place-items: center;
-  min-width: 320px;
-  min-height: 100vh;
+/* Input ve Select stilleri (Genel) */
+input, select {
+  font-family: inherit;
+  font-size: 14px;
 }
 
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
-}
-
+/* Buton stilleri */
 button {
   border-radius: 8px;
   border: 1px solid transparent;
@@ -42,13 +52,10 @@ button {
   font-size: 1em;
   font-weight: 500;
   font-family: inherit;
-  background-color: #1a1a1a;
   cursor: pointer;
   transition: border-color 0.25s;
 }
-button:hover {
-  border-color: #646cff;
-}
+
 button:focus,
 button:focus-visible {
   outline: 4px auto -webkit-focus-ring-color;
@@ -61,8 +68,5 @@ button:focus-visible {
   }
   a:hover {
     color: #747bff;
-  }
-  button {
-    background-color: #f9f9f9;
   }
 }
