@@ -11,7 +11,7 @@ import L from "leaflet";
 import axios from "axios";
 import "leaflet/dist/leaflet.css";
 
-// --- STİLLER (En Başta Tanımlı - Hata Riskini Önler) ---
+// --- STİLLER ---
 const styles = {
   container: { display: "flex", height: "100vh", width: "100%", overflow: "hidden", fontFamily: "sans-serif" },
   leftPanel: { width: "400px", padding: "20px", background: "#f8f9fa", borderRight: "1px solid #ddd", overflowY: "auto", display: "flex", flexDirection: "column", gap: "15px" },
@@ -28,9 +28,12 @@ const styles = {
   btnPrimary: { width: "100%", padding: "10px", background: "#007bff", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", marginBottom: "5px" },
   btnSuccess: { width: "100%", padding: "10px", background: "#28a745", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" },
   btnDanger: { background: "none", border: "none", color: "#dc3545", cursor: "pointer", fontSize: "14px", textDecoration: "underline" },
+  btnDeleteSmall: { background: "#dc3545", color: "white", border: "none", borderRadius: "4px", padding: "2px 6px", cursor: "pointer", fontSize: "12px", marginLeft: "10px" },
   btnToggleOn: { width: "100%", padding: "8px", background: "#ffc107", color: "black", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold", marginBottom: "10px" },
   btnToggleOff: { width: "100%", padding: "8px", background: "#6c757d", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", marginBottom: "10px" },
+  btnSecondary: { width: "100%", padding: "8px", background: "#6f42c1", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", marginBottom: "10px" },
   
+  stopBox: { background: "#e9ecef", padding: "10px", borderRadius: "4px", display: "flex", justifyContent: "space-between", alignItems: "center" },
   resultBox: { marginTop: "15px", padding: "15px", background: "#d1e7dd", borderRadius: "8px", border: "1px solid #badbcc" }
 };
 
@@ -44,7 +47,7 @@ L.Icon.Default.mergeOptions({
 
 const API_URL = "http://127.0.0.1:5000/api/routes";
 
-// --- HARİTA TIKLAMA BİLEŞENİ (Dışarı alındı) ---
+// --- HARİTA TIKLAMA BİLEŞENİ ---
 const MapEvents = ({ activeTab, isMapClickActive, onMapClick }) => {
   useMapEvents({
     click(e) {
@@ -57,7 +60,7 @@ const MapEvents = ({ activeTab, isMapClickActive, onMapClick }) => {
 };
 
 export default function MapView() {
-  const [activeTab, setActiveTab] = useState("route"); // route, location, vehicle
+  const [activeTab, setActiveTab] = useState("route");
   
   // Veriler
   const [vehicles, setVehicles] = useState([]);
@@ -69,8 +72,9 @@ export default function MapView() {
   const [segmentVehicles, setSegmentVehicles] = useState({});
   const [routeResult, setRouteResult] = useState(null);
   const [selectedLocationId, setSelectedLocationId] = useState("");
+  const [lockedIndices, setLockedIndices] = useState([0]);
 
-  // Lokasyon Ekleme State'leri
+  // Lokasyon Ekleme
   const [newLocName, setNewLocName] = useState("");
   const [newLocLat, setNewLocLat] = useState("");
   const [newLocLon, setNewLocLon] = useState("");
@@ -78,9 +82,10 @@ export default function MapView() {
   const [tempMarker, setTempMarker] = useState(null);
   const [isMapClickActive, setIsMapClickActive] = useState(false);
 
-  // Araç Ekleme State'leri
+  // Araç Ekleme
   const [newVehiclePlate, setNewVehiclePlate] = useState("");
   const [newVehicleTypeId, setNewVehicleTypeId] = useState("");
+  const [showVehicleForm, setShowVehicleForm] = useState(false);
 
   // --- VERİ YÜKLEME ---
   useEffect(() => {
@@ -93,15 +98,34 @@ export default function MapView() {
     axios.get(`${API_URL}/locations`).then((res) => setLocations(res.data));
   };
 
-  // --- HARİTA TIKLAMA İŞLEVİ ---
+  // --- SİLME FONKSİYONLARI (YENİ) ---
+  const deleteVehicle = async (id) => {
+    if(!window.confirm("Bu aracı silmek istediğinize emin misiniz?")) return;
+    try {
+        await axios.delete(`${API_URL}/vehicles/${id}`);
+        refreshData();
+    } catch (e) { alert("Hata: " + e.message); }
+  };
+
+  const deleteLocation = async (id) => {
+    if(!window.confirm("Bu lokasyonu silmek istediğinize emin misiniz?")) return;
+    try {
+        await axios.delete(`${API_URL}/locations/${id}`);
+        // Eğer silinen lokasyon rotadaysa rotayı temizle
+        setRouteStops(routeStops.filter(s => s.id !== id));
+        refreshData();
+    } catch (e) { alert("Hata: " + e.message); }
+  };
+
+  // --- HARİTA İŞLEMLERİ ---
   const handleMapClick = (latlng) => {
     setNewLocLat(latlng.lat);
     setNewLocLon(latlng.lng);
     setTempMarker(latlng);
-    setIsMapClickActive(false); // Seçimden sonra modu kapat
+    setIsMapClickActive(false);
   };
 
-  // --- ROTA İŞLEMLERİ ---
+  // --- ROTA VE OPTİMİZASYON ---
   const addStop = () => {
     if (!selectedLocationId) return;
     const loc = locations.find(l => l.id == selectedLocationId);
@@ -111,24 +135,47 @@ export default function MapView() {
   const removeStop = (index) => {
     const newStops = routeStops.filter((_, i) => i !== index);
     setRouteStops(newStops);
-    // Segmentleri de temizle
     const newSegments = { ...segmentVehicles };
     delete newSegments[index];
     setSegmentVehicles(newSegments);
+    setLockedIndices(lockedIndices.filter(i => i < newStops.length)); 
+  };
+
+  const toggleLock = (index) => {
+    if (lockedIndices.includes(index)) {
+        setLockedIndices(lockedIndices.filter(i => i !== index));
+    } else {
+        setLockedIndices([...lockedIndices, index]);
+    }
+  };
+
+  const handleOptimizeRoute = async () => {
+    if (routeStops.length < 3) {
+      alert("Optimizasyon için en az 3 durak gerekli."); return;
+    }
+    try {
+      const res = await axios.post(`${API_URL}/optimize-route`, { 
+        stops: routeStops,
+        locked_indices: lockedIndices
+      });
+      setRouteStops(res.data);
+      setSegmentVehicles({}); 
+      alert("Rota optimize edildi!");
+    } catch (err) {
+      alert("Hata: " + err.message);
+    }
   };
 
   const calculateRoute = async () => {
     if (routeStops.length < 2) {
-        alert("En az 2 durak eklemelisiniz!");
-        return;
+        alert("En az 2 durak eklemelisiniz!"); return;
     }
 
     const segments = [];
     for (let i = 0; i < routeStops.length - 1; i++) {
         const vId = segmentVehicles[i];
         if (!vId) {
-            alert(`${i+1}. yolculuk için araç seçilmedi!`);
-            return;
+            alert(`${i+1}. yolculuk için araç seçilmedi!`); return;
         }
         segments.push({
             start: { lat: routeStops[i].lat, lon: routeStops[i].lon },
@@ -147,17 +194,14 @@ export default function MapView() {
 
   // --- KAYIT İŞLEMLERİ ---
   const saveLocation = async () => {
-      if (!newLocName || !newLocLat || !newLocLon) {
-          alert("Tüm alanları doldurun."); return;
-      }
+      if (!newLocName || !newLocLat || !newLocLon) { alert("Eksik bilgi"); return; }
       try {
           await axios.post(`${API_URL}/locations`, {
               name: newLocName, lat: parseFloat(newLocLat), lon: parseFloat(newLocLon), type: newLocType
           });
           alert("Lokasyon Kaydedildi.");
-          setNewLocName(""); setNewLocLat(""); setNewLocLon(""); setTempMarker(null);
-          refreshData();
-      } catch(e) { alert("Hata: " + e.message); }
+          setNewLocName(""); setNewLocLat(""); setNewLocLon(""); setTempMarker(null); refreshData();
+      } catch(e) { alert("Hata"); }
   };
 
   const saveVehicle = async () => {
@@ -174,9 +218,8 @@ export default function MapView() {
       
       {/* SOL PANEL */}
       <div style={styles.leftPanel}>
-        <h2 style={styles.header}>Lojistik Panel v2</h2>
+        <h2 style={styles.header}>Lojistik Panel v4</h2>
 
-        {/* Sekmeler */}
         <div style={styles.tabContainer}>
             <button onClick={() => setActiveTab("route")} style={activeTab === "route" ? styles.activeTabBtn : styles.tabBtn}>🗺️ Rota</button>
             <button onClick={() => setActiveTab("location")} style={activeTab === "location" ? styles.activeTabBtn : styles.tabBtn}>📍 Lokasyon</button>
@@ -196,20 +239,30 @@ export default function MapView() {
                     <button onClick={addStop} style={{...styles.btnPrimary, width: "auto"}}>Ekle</button>
                 </div>
 
-                <div style={{maxHeight: "300px", overflowY: "auto", border: "1px solid #eee", padding: "5px", marginBottom: "10px"}}>
-                    {routeStops.map((stop, i) => (
+                <div style={{maxHeight: "400px", overflowY: "auto", border: "1px solid #eee", padding: "5px", marginBottom: "10px"}}>
+                    {routeStops.map((stop, i) => {
+                        const isLocked = lockedIndices.includes(i);
+                        return (
                         <div key={i} style={{marginBottom: "10px"}}>
-                            <div style={{display:"flex", justifyContent:"space-between", background:"#eee", padding:"5px", borderRadius:"4px"}}>
-                                <span>{i+1}. {stop.name}</span>
-                                <button onClick={() => removeStop(i)} style={styles.btnDanger}>Sil</button>
+                            <div style={styles.stopBox}>
+                                <div style={{display: "flex", alignItems: "center", gap: "10px"}}>
+                                    <button 
+                                        onClick={() => toggleLock(i)}
+                                        style={{background: "none", border: "none", cursor: "pointer", fontSize: "16px", opacity: isLocked ? 1 : 0.3}}
+                                        title="Sırayı Kilitle/Aç"
+                                    >
+                                        {isLocked ? "🔒" : "🔓"}
+                                    </button>
+                                    <span>{i+1}. {stop.name}</span>
+                                </div>
+                                <button onClick={() => removeStop(i)} style={styles.btnDanger}>Çıkar</button>
                             </div>
                             
-                            {/* Segment Aracı Seçimi */}
                             {i < routeStops.length - 1 && (
                                 <div style={{textAlign: "center", padding: "5px"}}>
-                                    <div style={{fontSize:"12px", color:"#666"}}>⬇ Bu arası hangi araçla? ⬇</div>
+                                    <div style={{fontSize:"12px", color:"#666"}}>⬇</div>
                                     <select 
-                                        style={{...styles.input, borderColor: "#007bff", color: "#0056b3"}}
+                                        style={{...styles.input, borderColor: "#007bff", color: "#0056b3", fontSize: "12px", padding: "4px"}}
                                         onChange={(e) => setSegmentVehicles({...segmentVehicles, [i]: e.target.value})}
                                         value={segmentVehicles[i] || ""}
                                     >
@@ -219,9 +272,13 @@ export default function MapView() {
                                 </div>
                             )}
                         </div>
-                    ))}
+                    )})}
                     {routeStops.length === 0 && <small style={{display:"block", textAlign:"center", color:"#999"}}>Henüz durak yok.</small>}
                 </div>
+
+                {routeStops.length > 2 && (
+                    <button onClick={handleOptimizeRoute} style={styles.btnSecondary}>⚡ Rotayı Optimize Et</button>
+                )}
 
                 <button onClick={calculateRoute} style={styles.btnSuccess}>ROTAYI HESAPLA 🚀</button>
 
@@ -240,12 +297,11 @@ export default function MapView() {
         {activeTab === "location" && (
             <div style={styles.card}>
                 <h4>Yeni Lokasyon Ekle</h4>
-                
                 <button 
                     onClick={() => setIsMapClickActive(!isMapClickActive)}
                     style={isMapClickActive ? styles.btnToggleOn : styles.btnToggleOff}
                 >
-                    {isMapClickActive ? "Harita Seçimi Aktif (İptal et)" : "🖱️ Haritadan Seçmek İçin Tıkla"}
+                    {isMapClickActive ? "Seçim Aktif (İptal)" : "🖱️ Haritadan Seç"}
                 </button>
 
                 <label>Lokasyon Adı:</label>
@@ -265,6 +321,18 @@ export default function MapView() {
                 </select>
 
                 <button onClick={saveLocation} style={styles.btnPrimary}>Kaydet</button>
+
+                {/* YENİ: Kayıtlı Lokasyonlar Listesi */}
+                <hr style={{margin: "15px 0", borderTop: "1px solid #eee"}}/>
+                <h5>Kayıtlı Lokasyonlar</h5>
+                <ul style={{fontSize:"13px", paddingLeft:"20px", color:"#555"}}>
+                    {locations.map(l => (
+                        <li key={l.id} style={{marginBottom: "5px"}}>
+                            <strong>{l.name}</strong> ({l.type})
+                            <button onClick={() => deleteLocation(l.id)} style={styles.btnDeleteSmall}>Sil</button>
+                        </li>
+                    ))}
+                </ul>
             </div>
         )}
 
@@ -272,21 +340,30 @@ export default function MapView() {
         {activeTab === "vehicle" && (
             <div style={styles.card}>
                 <h4>Filoya Araç Ekle</h4>
-                <label>Plaka:</label>
-                <input type="text" style={styles.input} value={newVehiclePlate} onChange={e=>setNewVehiclePlate(e.target.value)} placeholder="23 ABC 123" />
+                <button onClick={() => setShowVehicleForm(!showVehicleForm)} style={styles.btnToggleOff}>{showVehicleForm ? "Formu Gizle" : "+ Yeni Araç"}</button>
                 
-                <label>Araç Tipi:</label>
-                <select style={styles.input} value={newVehicleTypeId} onChange={e=>setNewVehicleTypeId(e.target.value)}>
-                    <option value="">-- Tip Seç --</option>
-                    {vehicleTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                </select>
-                
-                <button onClick={saveVehicle} style={styles.btnSuccess}>Aracı Kaydet</button>
+                {showVehicleForm && (
+                    <div style={{marginBottom: "15px", padding:"10px", background:"#eee", borderRadius:"5px"}}>
+                        <label>Plaka:</label>
+                        <input type="text" style={styles.input} value={newVehiclePlate} onChange={e=>setNewVehiclePlate(e.target.value)} placeholder="23 ABC 123" />
+                        <label>Tip:</label>
+                        <select style={styles.input} value={newVehicleTypeId} onChange={e=>setNewVehicleTypeId(e.target.value)}>
+                            <option value="">-- Tip Seç --</option>
+                            {vehicleTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                        </select>
+                        <button onClick={saveVehicle} style={styles.btnSuccess}>Kaydet</button>
+                    </div>
+                )}
                 
                 <hr style={{margin: "15px 0", borderTop: "1px solid #eee"}}/>
                 <h5>Mevcut Araçlar</h5>
                 <ul style={{fontSize:"13px", paddingLeft:"20px", color:"#555"}}>
-                    {vehicles.map(v => <li key={v.id}><strong>{v.plate_number}</strong> - {v.type_name}</li>)}
+                    {vehicles.map(v => (
+                        <li key={v.id} style={{marginBottom: "5px"}}>
+                            <strong>{v.plate_number}</strong> - {v.type_name}
+                            <button onClick={() => deleteVehicle(v.id)} style={styles.btnDeleteSmall}>Sil</button>
+                        </li>
+                    ))}
                 </ul>
             </div>
         )}
@@ -299,17 +376,25 @@ export default function MapView() {
             
             <MapEvents activeTab={activeTab} isMapClickActive={isMapClickActive} onMapClick={handleMapClick} />
 
-            {/* Kayıtlı Yerler */}
+            {/* Lokasyon Markerları - YENİ ÖZELLİK: POPUP İÇİNDE SİL BUTONU */}
             {locations.map(loc => (
                 <Marker key={loc.id} position={[loc.lat, loc.lon]} opacity={0.6}>
-                    <Popup><b>{loc.name}</b><br/>{loc.type}</Popup>
+                    <Popup>
+                        <b>{loc.name}</b><br/>
+                        Tür: {loc.type}<br/>
+                        <button onClick={() => deleteLocation(loc.id)} style={{marginTop: "5px", color: "red", cursor:"pointer"}}>Sil</button>
+                    </Popup>
                 </Marker>
             ))}
 
-            {/* Geçici Yer (Kırmızı) */}
             {tempMarker && <Marker position={tempMarker} opacity={1}><Popup>Seçilen Konum</Popup></Marker>}
 
-            {/* Rota */}
+            {routeStops.map((stop, i) => (
+                <Marker key={`stop-${i}`} position={[stop.lat, stop.lon]}>
+                   <Popup>{i+1}. {stop.name}</Popup>
+                </Marker>
+             ))}
+
             {routeResult && routeResult.path_coords && (
                 <Polyline positions={routeResult.path_coords.map(p => [p.lat, p.lon])} color="blue" weight={5} />
             )}

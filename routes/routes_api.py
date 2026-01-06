@@ -1,10 +1,10 @@
 from flask import Blueprint, request, jsonify
 from models.db import db, Vehicle, Location, VehicleType
-from services.route_service import calculate_mixed_vehicle_route
+from services.route_service import calculate_mixed_vehicle_route, optimize_stop_order
 
 routes_bp = Blueprint("routes", __name__, url_prefix="/api/routes")
 
-# --- ARAÇ TİPLERİ (Dropdown için) ---
+# --- ARAÇ TİPLERİ ---
 @routes_bp.route("/vehicle-types", methods=["GET"])
 def get_vehicle_types():
     types = VehicleType.query.all()
@@ -13,29 +13,37 @@ def get_vehicle_types():
 # --- ARAÇ İŞLEMLERİ ---
 @routes_bp.route("/vehicles", methods=["GET"])
 def get_vehicles():
-    # Sistemdeki kayıtlı araçları listele
     vehicles = Vehicle.query.all()
     return jsonify([v.to_dict() for v in vehicles])
 
 @routes_bp.route("/vehicles", methods=["POST"])
 def add_vehicle():
-    # Body: { "plate_number": "34MER57", "type_id": 1 }
     data = request.get_json()
     plate = data.get("plate_number")
     type_id = data.get("type_id")
 
     if not plate or not type_id:
-        return jsonify({"error": "Plaka ve Araç Tipi zorunludur"}), 400
+        return jsonify({"error": "Eksik bilgi"}), 400
 
-    # Aynı plaka var mı kontrol et
     if Vehicle.query.filter_by(plate_number=plate).first():
-        return jsonify({"error": "Bu plaka zaten kayıtlı"}), 400
+        return jsonify({"error": "Plaka zaten mevcut"}), 400
 
     new_vehicle = Vehicle(plate_number=plate, vehicle_type_id=type_id)
     db.session.add(new_vehicle)
     db.session.commit()
 
-    return jsonify({"message": "Araç başarıyla eklendi", "vehicle": new_vehicle.to_dict()}), 201
+    return jsonify({"message": "Araç eklendi", "vehicle": new_vehicle.to_dict()}), 201
+
+# YENİ: Araç Silme
+@routes_bp.route("/vehicles/<int:id>", methods=["DELETE"])
+def delete_vehicle(id):
+    vehicle = Vehicle.query.get(id)
+    if not vehicle:
+        return jsonify({"error": "Araç bulunamadı"}), 404
+    
+    db.session.delete(vehicle)
+    db.session.commit()
+    return jsonify({"message": "Araç silindi"}), 200
 
 # --- LOKASYON İŞLEMLERİ ---
 @routes_bp.route("/locations", methods=["GET"])
@@ -45,9 +53,7 @@ def get_locations():
 
 @routes_bp.route("/locations", methods=["POST"])
 def add_location():
-    # Body: { "name": "Yeni Depo", "lat": 38.123, "lon": 39.123, "type": "depo" }
     data = request.get_json()
-    
     try:
         new_loc = Location(
             name=data["name"],
@@ -61,27 +67,25 @@ def add_location():
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
+# YENİ: Lokasyon Silme
+@routes_bp.route("/locations/<int:id>", methods=["DELETE"])
+def delete_location(id):
+    location = Location.query.get(id)
+    if not location:
+        return jsonify({"error": "Lokasyon bulunamadı"}), 404
+    
+    db.session.delete(location)
+    db.session.commit()
+    return jsonify({"message": "Lokasyon silindi"}), 200
+
 # --- ROTA HESAPLAMA ---
 @routes_bp.route("/calculate-mixed", methods=["POST"])
 def calculate_mixed():
-    """
-    Beklenen JSON:
-    {
-        "segments": [
-            { 
-              "start": {"lat": 38.0, "lon": 39.0}, 
-              "end": {"lat": 38.1, "lon": 39.1}, 
-              "vehicle_id": 1 
-            },
-            ...
-        ]
-    }
-    """
     data = request.get_json()
     segments = data.get("segments", [])
 
     if not segments:
-        return jsonify({"error": "Rota segmentleri eksik"}), 400
+        return jsonify({"error": "Rota verisi eksik"}), 400
 
     result = calculate_mixed_vehicle_route(segments)
     
@@ -89,3 +93,21 @@ def calculate_mixed():
         return jsonify({"error": "Rota hesaplanamadı"}), 400
         
     return jsonify(result)
+
+# --- ROTA OPTİMİZASYONU ---
+@routes_bp.route("/optimize-route", methods=["POST"])
+def optimize_route():
+    data = request.get_json()
+    stops = data.get("stops", [])
+    locked_indices = data.get("locked_indices", [])
+
+    if len(stops) < 3:
+        return jsonify(stops)
+
+    try:
+        fixed_indices = [int(i) for i in locked_indices]
+        optimized_stops = optimize_stop_order(stops, fixed_indices)
+        return jsonify(optimized_stops)
+    except Exception as e:
+        print(f"Optimizasyon Hatası: {e}")
+        return jsonify({"error": str(e)}), 500
