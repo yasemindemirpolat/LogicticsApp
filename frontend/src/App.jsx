@@ -1,10 +1,9 @@
-import MapView from "./components/MapView";
-import "./App.css"; 
+import Dashboard from "./pages/Dashboard";
+
 
 function App() {
   return (
-   
-    <MapView />
+    <Dashboard />
   );
 }
 
